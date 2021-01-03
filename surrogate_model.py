@@ -1,9 +1,11 @@
+from __future__ import print_function
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
 from model import SurrogateModel
+from logger import Logger
 import torch.nn as nn
 import os
 import argparse
@@ -23,20 +25,20 @@ def MaxMinNormalization(x):
     Max = np.max(x)
     Min = np.min(x)
     x = (x - Min) / (Max - Min)
-    return x
+    return x, Max, Min
 
 def DataLoad ():
     x = np.loadtxt('./cache/7x.txt')
-    y = np.loadtxt('./cache/7y.txt')
-    x = MaxMinNormalization(x)
-    y = MaxMinNormalization(y)
+    y = np.loadtxt('./cache/7y.txt').reshape(10000, -1)
+    x, _, _ = MaxMinNormalization(x)
+    y, ymax, ymin = MaxMinNormalization(y)
     X = torch.from_numpy(x).float()
     Y = torch.from_numpy(y).float()
     Dataset = TensorDataset(X, Y)
     train_loader = DataLoader(dataset=Dataset, batch_size=100, shuffle=True, num_workers=2)
-    return train_loader, X, Y
+    return train_loader, X, Y, ymax, ymin
 
-def train (epoch, train_loader, net, Loss, args):
+def train (epoch, train_loader, net, Loss, args, log):
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), lr = args.LR)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.9)  # 阶梯式衰减
@@ -54,7 +56,7 @@ def train (epoch, train_loader, net, Loss, args):
         loss.backward()
         optimizer.step()
         sum_loss += loss.item()
-    print('第%d个epoch的损失为%f\n' % (epoch + 1, sum_loss / length))
+    log.logger.info('第%d个epoch的损失为%f\n' % (epoch + 1, sum_loss / length))
     Loss.append(sum_loss / length)
     scheduler.step()
     if (epoch + 1) % 10 == 0:
@@ -66,38 +68,44 @@ def train (epoch, train_loader, net, Loss, args):
             os.mkdir('./cache/checkpoint/'+'pic7')
         torch.save(state, './cache/checkpoint/'+'pic7'+'/'+str(epoch+1)+ 'ckpt.pth')
 
-def main():
-    args = parser()
-    train_loader, X, Y = DataLoad()
-    start_epoch = 0
-    Loss = []
-    net = SurrogateModel().cuda()
-    # net = SurrogateModel()
-    net = torch.nn.DataParallel(net, device_ids=[0, 1])
-    torch.backends.cudnn.benchmark = True
-    if args.resume:
-        weighted_file = os.path.join('./cache/checkpoint/' + 'pic7', args.epoch + 'ckpt.pth')
-        checkpoint = torch.load(weighted_file)
-        net.load_state_dict(checkpoint['net'])
-        start_epoch = checkpoint['epoch']
-    for epoch in range(start_epoch, args.Epochs):
-        train(epoch, train_loader, net, Loss, args)
-    print("Training Finished, Total EPOCH=%d" % args.Epochs)
-
+def visualization(Loss, y, y_pre):
     plt.figure(1)
     plt.title("loss")
     plt.plot(Loss)
     plt.show()
 
-    y_pre = net(X)
-    # pdb.set_trace()
-    print(y_pre)
     plt.figure(2)
     plt.title("curve")
-    y = plt.plot(Y.numpy())
-    y_pre = plt.plot(y_pre.numpy())
+    y, = plt.plot(y)
+    y_pre, = plt.plot(y_pre)
     plt.legend([y, y_pre], ["y", "y_pre"])
     plt.show()
+    return None
+
+def main():
+    args = parser()
+    log = Logger('./cache/log/' + '7_trainlog.txt', level='info')
+    train_loader, X, Y, ymax, ymin = DataLoad()
+    start_epoch = 0
+    Loss = []
+    net = SurrogateModel().cuda()
+    net = torch.nn.DataParallel(net, device_ids=[0, 1])
+    torch.backends.cudnn.benchmark = True
+    if args.resume:
+        log.logger.info('Resuming from checkpoint')
+        weighted_file = os.path.join('./cache/checkpoint/' + 'pic7', args.epoch + 'ckpt.pth')
+        checkpoint = torch.load(weighted_file)
+        net.load_state_dict(checkpoint['net'])
+        start_epoch = checkpoint['epoch']
+    for epoch in range(start_epoch, args.Epochs):
+        train(epoch, train_loader, net, Loss, args, log)
+    log.logger.info('='*80)
+    log.logger.info(">>Training Finished!<<  Total EPOCH=%d\n" % args.Epochs)
+    y_pre = net(X).cuda().data.cpu().numpy()
+    y_pre = y_pre*(ymax - ymin) + ymin
+    y = Y.numpy()*(ymax - ymin) + ymin  #反归一化
+    log.logger.info(y_pre)
+    # visualization(Loss, y, y_pre)
 
 if __name__ == '__main__':
     main()
