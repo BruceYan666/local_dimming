@@ -15,13 +15,21 @@ def parser():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--epoch', '-e', default=None, help='resume from epoch')
     parser.add_argument('--Epochs', '-E', default=300, help='the num of training epochs')
-    parser.add_argument('--LR', default=0.1, help='Learning Rate')
+    parser.add_argument('--LR', default=0.01, help='Learning Rate')
     args = parser.parse_args()
     return args
+
+def MaxMinNormalization(x):
+    Max = np.max(x)
+    Min = np.min(x)
+    x = (x - Min) / (Max - Min)
+    return x
 
 def DataLoad ():
     x = np.loadtxt('./cache/7x.txt')
     y = np.loadtxt('./cache/7y.txt')
+    x = MaxMinNormalization(x)
+    y = MaxMinNormalization(y)
     X = torch.from_numpy(x).float()
     Y = torch.from_numpy(y).float()
     Dataset = TensorDataset(X, Y)
@@ -37,8 +45,8 @@ def train (epoch, train_loader, net, Loss, args):
     for i, data in enumerate(train_loader, 0):
         length = len(train_loader)
         inputs, labels = data
-        # inputs = inputs.cuda()
-        # labels = labels.cuda()
+        inputs = inputs.cuda()
+        labels = labels.cuda()
         optimizer.zero_grad()
 
         out = net(inputs)
@@ -63,10 +71,10 @@ def main():
     train_loader, X, Y = DataLoad()
     start_epoch = 0
     Loss = []
-    # net = SurrogateModel().cuda()
-    net = SurrogateModel()
-    # net = torch.nn.DataParallel(net, device_ids=[1])
-    # torch.backends.cudnn.benchmark = True
+    net = SurrogateModel().cuda()
+    # net = SurrogateModel()
+    net = torch.nn.DataParallel(net, device_ids=[0, 1])
+    torch.backends.cudnn.benchmark = True
     if args.resume:
         weighted_file = os.path.join('./cache/checkpoint/' + 'pic7', args.epoch + 'ckpt.pth')
         checkpoint = torch.load(weighted_file)
