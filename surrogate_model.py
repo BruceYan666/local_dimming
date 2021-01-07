@@ -16,7 +16,7 @@ def parser():
     parser.add_argument('--pretrain', '-p', action='store_true', help='Loading pretrain data')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--epoch', '-e', default=None, help='resume from epoch')
-    parser.add_argument('--Epochs', '-E', default=300, help='the num of training epochs')
+    parser.add_argument('--Epochs', '-E', default=50, help='the num of training epochs')
     parser.add_argument('--LR', default=0.01, help='Learning Rate')
     args = parser.parse_args()
     return args
@@ -28,35 +28,45 @@ def MaxMinNormalization(x):
     return x, Max, Min
 
 def DataLoad ():
-    x = np.loadtxt('./cache/7x.txt')
-    y = np.loadtxt('./cache/7y.txt').reshape(10000, -1)
-    x, _, _ = MaxMinNormalization(x)
+    D = np.loadtxt('./cache/7.txt')
+    x = D[:, 0:-1]
+    y = D[:, -1].reshape(10000,-1)
+    pdb.set_trace()
+    # x = np.loadtxt('./cache/7x.txt')
+    # y = np.loadtxt('./cache/7y.txt').reshape(10000, -1)
+    # x, _, _ = MaxMinNormalization(x)
     y, ymax, ymin = MaxMinNormalization(y)
+    x = x / 255
+    # pdb.set_trace()
     X = torch.from_numpy(x).float()
     Y = torch.from_numpy(y).float()
     Dataset = TensorDataset(X, Y)
     train_loader = DataLoader(dataset=Dataset, batch_size=100, shuffle=True, num_workers=2)
     return train_loader, X, Y, ymax, ymin
 
-def train (epoch, train_loader, net, Loss, args, log):
+def train (epoch, train_loader, net, Loss, args, log, ymax, ymin):
     criterion = nn.MSELoss()
     optimizer = torch.optim.SGD(net.parameters(), lr = args.LR)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.9)  # 阶梯式衰减
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)  # 阶梯式衰减
     net.train()
     sum_loss = 0.0
     for i, data in enumerate(train_loader, 0):
         length = len(train_loader)
+        # pdb.set_trace()
         inputs, labels = data
         inputs = inputs.cuda()
         labels = labels.cuda()
         optimizer.zero_grad()
 
         out = net(inputs)
+        out1 = out * (ymax - ymin) + ymin
+        # pdb.set_trace()
         loss = criterion(out, labels)
         loss.backward()
         optimizer.step()
         sum_loss += loss.item()
-    log.logger.info('第%d个epoch的损失为%f\n' % (epoch + 1, sum_loss / length))
+        # pdb.set_trace()
+    log.logger.info('第%d个epoch的损失为%f\n' % (epoch + 1, sum_loss/length))
     Loss.append(sum_loss / length)
     scheduler.step()
     if (epoch + 1) % 10 == 0:
@@ -89,7 +99,7 @@ def main():
     start_epoch = 0
     Loss = []
     net = SurrogateModel().cuda()
-    net = torch.nn.DataParallel(net, device_ids=[0, 1])
+    net = torch.nn.DataParallel(net, device_ids=[0])
     torch.backends.cudnn.benchmark = True
     if args.resume:
         log.logger.info('Resuming from checkpoint')
@@ -98,12 +108,11 @@ def main():
         net.load_state_dict(checkpoint['net'])
         start_epoch = checkpoint['epoch']
     for epoch in range(start_epoch, args.Epochs):
-        train(epoch, train_loader, net, Loss, args, log)
+        train(epoch, train_loader, net, Loss, args, log ,ymax, ymin)
     log.logger.info('='*80)
     log.logger.info(">>Training Finished!<<  Total EPOCH=%d\n" % args.Epochs)
     y_pre = net(X).cuda().data.cpu().numpy()
-    y_pre = y_pre*(ymax - ymin) + ymin
-    y = Y.numpy()*(ymax - ymin) + ymin  #反归一化
+    y = Y.numpy()
     log.logger.info(y_pre)
     # visualization(Loss, y, y_pre)
 

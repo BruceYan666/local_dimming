@@ -22,7 +22,7 @@ class Logger(object):
         ch.setFormatter(format_str) #设置屏幕上显示的格式
 
         #创建一个handler，用于写入日志文件
-        fh = logging.FileHandler(filename=filename,mode='a')
+        fh = logging.FileHandler(filename=filename,mode='w')
         fh.setLevel(logging.INFO) # 用于写到file的等级开关
         fh.setFormatter(format_str)#设置文件里写入的格式
 
